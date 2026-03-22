@@ -1,0 +1,41 @@
+# Environment & secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+env/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Data & cache
+data/
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE & editor
+.vscode/
+.idea/
+*.suo
+*.user
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Claude AI
+.claude/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Node (if any)
+node_modules/

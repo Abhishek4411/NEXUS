@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEXUS — Global Intelligence Platform</title>
+
+  <!-- CesiumJS 3D Globe -->
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+
+  <!-- satellite.js — TLE position computation -->
+  <script src="https://cdn.jsdelivr.net/npm/satellite.js@5.0.0/dist/satellite.min.js"></script>
+
+  <!-- NEXUS Styles -->
+  <link rel="stylesheet" href="/css/nexus.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+     TOP NAV BAR
+═══════════════════════════════════════════════════════ -->
+<header id="topbar">
+  <div class="topbar-left">
+    <div id="logo">
+      <span class="logo-nexus">NEXUS</span>
+      <span class="logo-sub">GLOBAL INTELLIGENCE PLATFORM</span>
+    </div>
+  </div>
+
+  <div class="topbar-center">
+    <div id="search-box">
+      <input type="text" id="search-input" placeholder="Search satellite, flight, location..." autocomplete="off" />
+      <div id="search-results" class="dropdown hidden"></div>
+    </div>
+    <div id="utc-clock"></div>
+  </div>
+
+  <div class="topbar-right">
+    <button class="btn-icon" id="btn-refresh-all" title="Refresh All Data">↺</button>
+    <button class="btn-icon" id="btn-fullscreen" title="Fullscreen">⛶</button>
+    <button class="btn-icon" id="btn-settings" title="Settings">⚙</button>
+    <div id="conn-status">
+      <span class="dot dot-green"></span>
+      <span id="conn-text">LIVE</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════
+     MAIN LAYOUT
+═══════════════════════════════════════════════════════ -->
+<main id="main-layout">
+
+  <!-- LEFT SIDEBAR — Layer Controls -->
+  <aside id="sidebar-left">
+    <div class="sidebar-section">
+      <div class="section-title">EFFECT MODE</div>
+      <div id="effect-controls" class="btn-group">
+        <button class="effect-btn active" data-effect="normal">NORMAL</button>
+        <button class="effect-btn" data-effect="nvg">NVG</button>
+        <button class="effect-btn" data-effect="thermal">THERMAL</button>
+        <button class="effect-btn" data-effect="crt">CRT</button>
+      </div>
+      <div class="control-row">
+        <label>BLOOM</label>
+        <input type="range" id="bloom-strength" min="0" max="3" step="0.1" value="0" />
+      </div>
+      <div class="control-row">
+        <label>BRIGHTNESS</label>
+        <input type="range" id="brightness" min="-1" max="1" step="0.05" value="0" />
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-title">DATA LAYERS</div>
+
+      <div class="layer-item" id="layer-satellites">
+        <div class="layer-toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-satellites" checked />
+            <span class="slider"></span>
+          </label>
+          <span class="layer-name">SATELLITES</span>
+          <span class="layer-count" id="count-satellites">—</span>
+        </div>
+        <div class="layer-options" id="opts-satellites">
+          <select id="sat-group">
+            <option value="active">All Active</option>
+            <option value="starlink">Starlink</option>
+            <option value="stations">Space Stations</option>
+            <option value="gps">GPS</option>
+            <option value="glonass">GLONASS</option>
+            <option value="weather">Weather</option>
+            <option value="geo">GEO Belt</option>
+            <option value="amateur">Amateur</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="layer-item" id="layer-iss">
+        <div class="layer-toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-iss" checked />
+            <span class="slider"></span>
+          </label>
+          <span class="layer-name">ISS</span>
+          <span class="layer-badge blink-green">LIVE</span>
+        </div>
+      </div>
+
+      <div class="layer-item" id="layer-flights">
+        <div class="layer-toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-flights" checked />
+            <span class="slider"></span>
+          </label>
+          <span class="layer-name">FLIGHTS</span>
+          <span class="layer-count" id="count-flights">—</span>
+        </div>
+      </div>
+
+      <div class="layer-item" id="layer-seismic">
+        <div class="layer-toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-seismic" checked />
+            <span class="slider"></span>
+          </label>
+          <span class="layer-name">EARTHQUAKES</span>
+          <span class="layer-count" id="count-seismic">—</span>
+        </div>
+        <div class="layer-options" id="opts-seismic">
+          <select id="seismic-period">
+            <option value="day">Past 24h</option>
+            <option value="week">Past Week</option>
+            <option value="month">Past Month</option>
+          </select>
+          <div class="control-row">
+            <label>Min Mag</label>
+            <input type="range" id="seismic-mag" min="0" max="8" step="0.5" value="2.5" />
+            <span id="seismic-mag-val">2.5</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="layer-item" id="layer-launches">
+        <div class="layer-toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-launches" checked />
+            <span class="slider"></span>
+          </label>
+          <span class="layer-name">LAUNCHES</span>
+          <span class="layer-count" id="count-launches">—</span>
+        </div>
+      </div>
+
+      <div class="layer-item" id="layer-neo">
+        <div class="layer-toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-neo" />
+            <span class="slider"></span>
+          </label>
+          <span class="layer-name">ASTEROIDS / NEO</span>
+          <span class="layer-count" id="count-neo">—</span>
+        </div>
+      </div>
+
+      <div class="layer-item" id="layer-space">
+        <div class="layer-toggle">
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-space" />
+            <span class="slider"></span>
+          </label>
+          <span class="layer-name">SOLAR SYSTEM</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-title">CAMERA PRESETS</div>
+      <div id="preset-buttons">
+        <button class="preset-btn" data-lat="40.7128" data-lon="-74.0060" data-alt="500000" data-name="New York">NEW YORK</button>
+        <button class="preset-btn" data-lat="51.5074" data-lon="-0.1278" data-alt="500000" data-name="London">LONDON</button>
+        <button class="preset-btn" data-lat="35.6762" data-lon="139.6503" data-alt="500000" data-name="Tokyo">TOKYO</button>
+        <button class="preset-btn" data-lat="28.6139" data-lon="77.2090" data-alt="500000" data-name="Delhi">DELHI</button>
+        <button class="preset-btn" data-lat="28.5383" data-lon="77.3210" data-alt="50000" data-name="ISRO SDSC">ISRO SDSC</button>
+        <button class="preset-btn" data-lat="28.4720" data-lon="-80.5780" data-alt="50000" data-name="Kennedy SC">KENNEDY SC</button>
+        <button class="preset-btn" data-lat="45.9225" data-lon="63.3420" data-alt="100000" data-name="Baikonur">BAIKONUR</button>
+        <button class="preset-btn" data-lat="0" data-lon="0" data-alt="25000000" data-name="Globe">FULL GLOBE</button>
+      </div>
+    </div>
+
+    <div class="sidebar-section" id="space-weather-box">
+      <div class="section-title">SPACE WEATHER</div>
+      <div id="kp-display">
+        <span class="label-dim">KP INDEX</span>
+        <span id="kp-value" class="big-value">—</span>
+      </div>
+      <button class="btn-sm" id="btn-load-weather">REFRESH</button>
+    </div>
+  </aside>
+
+  <!-- CENTER — 3D Globe -->
+  <div id="cesium-container"></div>
+
+  <!-- RIGHT SIDEBAR — Entity Details -->
+  <aside id="sidebar-right">
+    <div id="entity-panel" class="hidden">
+      <div class="section-title" id="entity-title">SELECT AN OBJECT</div>
+      <div id="entity-content"></div>
+      <button class="btn-sm" id="btn-track">📡 TRACK</button>
+      <button class="btn-sm" id="btn-orbit">🔄 SHOW ORBIT</button>
+      <button class="btn-sm" id="btn-deselect">✕ DESELECT</button>
+    </div>
+
+    <div id="no-selection-panel">
+      <div class="section-title">INTELLIGENCE FEED</div>
+      <div id="feed-list">
+        <div class="feed-item shimmer">Loading data streams...</div>
+      </div>
+    </div>
+
+    <div id="stats-panel">
+      <div class="section-title">SYSTEM STATUS</div>
+      <div class="stat-row"><span class="stat-label">SATELLITES</span><span class="stat-val" id="stat-sat">—</span></div>
+      <div class="stat-row"><span class="stat-label">FLIGHTS</span><span class="stat-val" id="stat-flt">—</span></div>
+      <div class="stat-row"><span class="stat-label">EARTHQUAKES</span><span class="stat-val" id="stat-eq">—</span></div>
+      <div class="stat-row"><span class="stat-label">LAUNCHES</span><span class="stat-val" id="stat-lnch">—</span></div>
+      <div class="stat-row"><span class="stat-label">ISS CREW</span><span class="stat-val" id="stat-crew">—</span></div>
+      <div class="stat-row"><span class="stat-label">FPS</span><span class="stat-val" id="stat-fps">—</span></div>
+    </div>
+
+    <!-- Upcoming Launches section -->
+    <div id="upcoming-launches">
+      <div class="section-title">UPCOMING LAUNCHES</div>
+      <div id="launch-list">
+        <div class="shimmer">Loading...</div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<!-- ═══════════════════════════════════════════════════════
+     BOTTOM STATUS BAR
+═══════════════════════════════════════════════════════ -->
+<footer id="statusbar">
+  <div class="status-left">
+    <span class="status-item"><span class="dot dot-cyan"></span> NEXUS v1.2</span>
+    <span class="status-item" id="status-sats">SAT: —</span>
+    <span class="status-item" id="status-flights">FLT: —</span>
+    <span class="status-item" id="status-eq">EQ: —</span>
+  </div>
+  <div class="status-center" id="status-coords">LAT: — LON: — ALT: —</div>
+  <div class="status-right">
+    <span class="status-item">CELESTRAK</span>
+    <span class="status-item">OPENSKY</span>
+    <span class="status-item">USGS</span>
+    <span class="status-item">SPACE DEVS</span>
+    <span class="status-item">NASA</span>
+  </div>
+</footer>
+
+<!-- ═══════════════════════════════════════════════════════
+     SETTINGS MODAL
+═══════════════════════════════════════════════════════ -->
+<div id="settings-modal" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>NEXUS SETTINGS</h2>
+      <button id="close-settings">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="setting-group">
+        <label>Cesium Ion Token (optional — enables HD terrain + imagery)</label>
+        <input type="text" id="cesium-token-input" placeholder="Paste your free token from cesium.com/ion/signup" />
+        <button class="btn-sm" id="apply-token">APPLY</button>
+        <small>Free tokens: <a href="https://cesium.com/ion/signup" target="_blank">cesium.com/ion/signup</a></small>
+      </div>
+      <div class="setting-group">
+        <label>OpenSky Username (optional — higher rate limits)</label>
+        <input type="text" id="opensky-user" placeholder="OpenSky username" />
+      </div>
+      <div class="setting-group">
+        <label>Imagery Provider</label>
+        <select id="imagery-select">
+          <option value="esri">🛰 ESRI Satellite (realistic, default)</option>
+          <option value="hybrid">🛰+🗺 Hybrid — Satellite + Street Labels</option>
+          <option value="satellite">🛰 Google Maps HD Satellite (Ion token)</option>
+          <option value="osm">🗺 OpenStreetMap — Full Streets + Names</option>
+          <option value="terrain">🏔 Terrain Map — Hills + City Names</option>
+          <option value="light">📋 Light Map — Clean Labels</option>
+          <option value="dark">🌑 Dark Matter — Dark Mode</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Notification toast -->
+<div id="toast-container"></div>
+
+<!-- JavaScript -->
+<script src="/js/globe.js"></script>
+<script src="/js/effects.js"></script>
+<script src="/js/layers/satellites.js"></script>
+<script src="/js/layers/flights.js"></script>
+<script src="/js/layers/seismic.js"></script>
+<script src="/js/layers/launches.js"></script>
+<script src="/js/layers/iss.js"></script>
+<script src="/js/layers/neo.js"></script>
+<script src="/js/layers/space.js"></script>
+<script src="/js/ui/panels.js"></script>
+<script src="/js/ui/controls.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
