@@ -275,6 +275,99 @@ Open: http://localhost:8000
 
 ## Change Log
 
+### v1.6.2 — 2026-03-22
+**ISS Layer Cleanup + Visible Earth Rotation:**
+
+**ISS Layer Removed — Using Satellite Layer Instead:**
+- Removed dedicated ISS WebSocket layer (`iss.js`) — it updated only every 5s causing jumpy position updates
+- ISS now renders via satellite layer as NORAD 25544 — uses SGP4 propagation with smooth 60fps interpolation via `CallbackProperty`
+- Removed ISS toggle from left sidebar, ISS crew stat from system status, ISS script tag from HTML
+- Removed `ISSLayer.init()`, `ISSLayer.connect()`, `ISSLayer.loadCrew()` from `app.js`
+- ISS can still be tracked/orbited via satellite click → TRACK button (smooth continuous follow)
+
+**Visible Earth Auto-Rotation:**
+- Added `_setupAutoRotation()` in `globe.js` — camera slowly rotates around Earth at ~1°/sec (~6 min/revolution), west-to-east (realistic direction)
+- Auto-rotation pauses during user interaction (drag, zoom, scroll) — resumes 3 seconds after last interaction
+- Auto-rotation pauses when tracking any entity (`viewer.trackedEntity`)
+- Gives "living globe" feel without breaking satellite/flight positions (positions computed in ECEF, camera moves independently)
+
+**Files changed:** `satellites.js`, `globe.js`, `index.html`, `app.js`, `controls.js`
+
+---
+
+### v1.6.1 — 2026-03-22
+**Bug Fixes — Tracking, GPU, Immersive Mode:**
+
+**Camera Tracking (Critical Fix):**
+- Satellite positions now use `Cesium.CallbackProperty` instead of raw `Cartesian3` assignment
+  - Root cause: `viewer.trackedEntity` requires a `PositionProperty`, not a plain Cartesian3 value
+  - `CallbackProperty(fn, false)` returns interpolated position every frame — Cesium's tracking reads it continuously
+- Interpolated positions stored in `_interpPositions` map; `_smoothTick()` no longer assigns `ent.position` directly
+- Extrapolation beyond t=1.0 (up to 1.5) prevents "pause" jitter between SGP4 re-propagation intervals
+- Space objects (planets, Sun, Moon, black holes, galaxies) also use `CallbackProperty` via `posRef` pattern
+- Dynamic position updates (Sun/Moon every 60s) now update via `ent._posRef.value` instead of `ent.position`
+
+**GPU Renderer Detection:**
+- Added WebGL `WEBGL_debug_renderer_info` detection at globe init
+- Logs actual GPU renderer and vendor to console (`GPU Renderer: NVIDIA GeForce GTX 1650`)
+- Shows toast warning if Intel integrated GPU detected, with instructions to switch to NVIDIA via Windows Graphics Settings
+- Note: `powerPreference: "high-performance"` is a browser hint — Windows OS-level GPU settings take precedence
+
+**Immersive Mode Fix:**
+- Added `!important` to all panel-collapsed CSS properties (transform, opacity, width, min-width, border, padding)
+- Added `width`, `min-width`, and `padding` to CSS transition list for smooth animated collapse
+- Cache-busting `?v=1.6.1` added to all script and CSS tags in `index.html` to force fresh loads
+- Version bumped to v1.6.1 in status bar
+
+**Files changed:** `satellites.js`, `space.js`, `globe.js`, `index.html`, `nexus.css`
+
+---
+
+### v1.6.0 — 2026-03-22
+**GPU & Performance:**
+- Force discrete NVIDIA GPU via `powerPreference: "high-performance"` in WebGL context (was using Intel Iris Xe)
+- Reduced scroll zoom speed (`zoomFactor: 1.5`, default was 5.0) for smoother zoom control
+- Real-time Earth rotation enabled (`viewer.clock.shouldAnimate = true`)
+
+**3D Planet Rendering:**
+- Replaced 2D SVG billboard planets with 3D EllipsoidGraphics (textured spheres)
+- Solar System Scope 2K textures for all 9 bodies (Sun, Moon, Mercury–Neptune)
+- Fallback to colored spheres if CORS blocks cross-origin textures
+- Scaled scene distances: Moon=384k km, Mercury=20M km, Venus=36M km, Mars=76M km, Jupiter=260M km, Saturn=477M km, Uranus=960M km, Neptune=1.5T km
+- Per-type scaling for billboard objects (black holes, galaxies) instead of single NearFarScalar
+
+**Continuous Camera Tracking:**
+- All tracking now uses Cesium's built-in `viewer.trackedEntity` for continuous camera follow
+- Camera stays locked on tracked object while allowing free zoom/orbit
+- Applies to satellites (satellites.js) and space objects (space.js)
+- Tracking stops on: Deselect, Refresh All, or browser refresh
+
+**Asteroid Belt:**
+- 300 point entities between Mars and Jupiter orbits (1e11 – 2.3e11 m)
+- Random RA distribution, small declination scatter around ecliptic plane
+- GPU-efficient point rendering (batched draw call)
+
+**Duplicate Moon Fix:**
+- CesiumJS built-in Moon disabled when Solar System layer is toggled ON
+- Re-enabled when Solar System is toggled OFF or cleared
+- `NexusGlobe.setBuiltinMoon(show)` API added
+
+**Immersive Mode:**
+- New ◨ button in top bar — hides all panels (left sidebar, right sidebar, top bar, status bar)
+- Smooth CSS transitions (slide out in respective directions)
+- Fullscreen button (⛶) now also enters immersive mode
+- ESC exits both fullscreen and immersive mode
+
+**Refresh Button Enhanced:**
+- Now stops all active tracking (satellites + space objects)
+- Resets camera to default globe view (fly to center of Earth, 25,000 km altitude)
+- Hides entity detail panel
+- Then refreshes all data layers
+
+**Files changed:** `globe.js`, `space.js` (full rewrite), `satellites.js`, `controls.js`, `panels.js`, `index.html`, `nexus.css`
+
+---
+
 ### v1.2.0 — 2026-03-20
 **Fixed:**
 - `WinError 10013` on `start.bat` — changed server bind from `0.0.0.0` to `127.0.0.1` (avoids Windows Firewall block)

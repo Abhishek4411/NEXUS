@@ -253,6 +253,7 @@ const NexusPanels = (() => {
     document.getElementById('entity-panel')?.classList.add('hidden');
     document.getElementById('no-selection-panel')?.classList.remove('hidden');
     SatelliteLayer.stopTracking();
+    SpaceLayer.stopTracking();
   }
 
   return { init, hideEntityPanel };

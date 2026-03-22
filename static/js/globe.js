@@ -40,6 +40,12 @@ const NexusGlobe = (() => {
     });
 
     viewer = new Cesium.Viewer(containerId, {
+      contextOptions: {
+        webgl: {
+          powerPreference: 'high-performance',   // ✨ Force discrete GPU (NVIDIA)
+          failIfMajorPerformanceCaveat: false,
+        },
+      },
       imageryProvider: false,          // Added after construction
       baseLayerPicker: false,
       geocoder: false,
@@ -74,6 +80,13 @@ const NexusGlobe = (() => {
     // Remove double-click select behavior
     viewer.screenSpaceEventHandler.removeInputAction(Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
+    // ── Real-time Earth rotation ────────────────────────────────────────
+    viewer.clock.shouldAnimate = true;
+    viewer.clock.multiplier = 1;  // 1× real-time rotation
+
+    // ── Slow down scroll zoom (default 5.0 is too fast) ─────────────────
+    viewer.scene.screenSpaceCameraController.zoomFactor = 1.5;
+
     // Imagery (async — Ion if token, CartoDB otherwise)
     await _loadImagery(ionToken);
 
@@ -83,11 +96,33 @@ const NexusGlobe = (() => {
     // FPS counter
     _setupFpsTracking();
 
+    // ── Visible auto-rotation ─────────────────────────────────────────────
+    _setupAutoRotation();
+
     // Initial camera position: full Earth view
     viewer.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(0, 20, 25000000),
       orientation: { pitch: Cesium.Math.toRadians(-90) },
     });
+
+    // ── GPU renderer detection ──────────────────────────────────────────────
+    try {
+      const gl = viewer.scene.canvas.getContext('webgl2') || viewer.scene.canvas.getContext('webgl');
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (ext) {
+        const renderer = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+        const vendor = gl.getParameter(ext.UNMASKED_VENDOR_WEBGL);
+        console.log(`🎮 GPU Renderer: ${renderer}`);
+        console.log(`🎮 GPU Vendor: ${vendor}`);
+        const gpuEl = document.getElementById('status-coords');
+        if (renderer.toLowerCase().includes('intel')) {
+          console.warn('⚠️ Using integrated GPU. For NVIDIA: Windows Settings → Display → Graphics → Add your browser → High Performance');
+          NexusToast?.show?.(`GPU: ${renderer} — Set browser to "High Performance" in Windows Graphics Settings for NVIDIA`, 'warn', 8000);
+        } else {
+          console.log(`✅ Using discrete GPU: ${renderer}`);
+        }
+      }
+    } catch (e) { /* GPU detection not critical */ }
 
     console.log('🌍 NEXUS Globe initialized — stars, sun, moon, atmosphere active');
     return viewer;
@@ -196,6 +231,58 @@ const NexusGlobe = (() => {
       url: 'https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png',
       maximumLevel: 18,
       credit: '© CARTO, © OpenStreetMap contributors',
+    });
+  }
+
+  // ── Auto-rotation: visible slow globe spin ──────────────────────────────
+  // Pauses during user drag/zoom and entity tracking. Resumes 3s after interaction.
+  function _setupAutoRotation() {
+    let _userInteracting = false;
+    let _resumeTimer = null;
+    const ROTATE_SPEED = 0.0003;  // radians per frame (~1°/sec at 60fps → ~6 min/revolution)
+    const RESUME_DELAY = 3000;    // resume rotation 3s after user stops interacting
+
+    // Detect user interaction start
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    handler.setInputAction(() => {
+      _userInteracting = true;
+      if (_resumeTimer) clearTimeout(_resumeTimer);
+    }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+    handler.setInputAction(() => {
+      _userInteracting = true;
+      if (_resumeTimer) clearTimeout(_resumeTimer);
+    }, Cesium.ScreenSpaceEventType.RIGHT_DOWN);
+    handler.setInputAction(() => {
+      _userInteracting = true;
+      if (_resumeTimer) clearTimeout(_resumeTimer);
+    }, Cesium.ScreenSpaceEventType.MIDDLE_DOWN);
+
+    // Detect user interaction end — resume rotation after delay
+    handler.setInputAction(() => {
+      if (_resumeTimer) clearTimeout(_resumeTimer);
+      _resumeTimer = setTimeout(() => { _userInteracting = false; }, RESUME_DELAY);
+    }, Cesium.ScreenSpaceEventType.LEFT_UP);
+    handler.setInputAction(() => {
+      if (_resumeTimer) clearTimeout(_resumeTimer);
+      _resumeTimer = setTimeout(() => { _userInteracting = false; }, RESUME_DELAY);
+    }, Cesium.ScreenSpaceEventType.RIGHT_UP);
+    handler.setInputAction(() => {
+      if (_resumeTimer) clearTimeout(_resumeTimer);
+      _resumeTimer = setTimeout(() => { _userInteracting = false; }, RESUME_DELAY);
+    }, Cesium.ScreenSpaceEventType.MIDDLE_UP);
+
+    // Pause during scroll zoom (brief pause)
+    handler.setInputAction(() => {
+      _userInteracting = true;
+      if (_resumeTimer) clearTimeout(_resumeTimer);
+      _resumeTimer = setTimeout(() => { _userInteracting = false; }, RESUME_DELAY);
+    }, Cesium.ScreenSpaceEventType.WHEEL);
+
+    // Auto-rotate on each frame
+    viewer.scene.preRender.addEventListener(() => {
+      // Skip when user is interacting, or when tracking an entity
+      if (_userInteracting || viewer.trackedEntity) return;
+      viewer.camera.rotateRight(-ROTATE_SPEED);
     });
   }
 
@@ -309,5 +396,24 @@ const NexusGlobe = (() => {
     return viewer.camera.positionCartographic.height / 1000;
   }
 
-  return { init, flyTo, setImagery, getViewer, getCameraAltKm };
+  /** Reset camera to default globe view and stop all tracking */
+  function resetCamera() {
+    if (!viewer) return;
+    viewer.trackedEntity = undefined;
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(0, 20, 25000000),
+      orientation: { pitch: Cesium.Math.toRadians(-90) },
+      duration: 2,
+    });
+  }
+
+  /** Toggle the built-in CesiumJS Moon (to avoid duplicate with space layer) */
+  function setBuiltinMoon(show) {
+    if (viewer && viewer.scene.moon) {
+      viewer.scene.moon.show = show;
+    }
+  }
+
+  return { init, flyTo, setImagery, getViewer, getCameraAltKm, resetCamera, setBuiltinMoon };
 })();

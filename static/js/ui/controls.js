@@ -13,6 +13,7 @@ const NexusControls = (() => {
     _setupSearch();
     _setupSettings();
     _setupDeselect();
+    _setupImmersiveMode();
     _startClock();
     console.log('✅ Controls initialized');
   }
@@ -34,11 +35,6 @@ const NexusControls = (() => {
     });
     document.getElementById('sat-group')?.addEventListener('change', (e) => {
       SatelliteLayer.loadGroup(e.target.value);
-    });
-
-    // ISS
-    document.getElementById('toggle-iss')?.addEventListener('change', (e) => {
-      ISSLayer.setVisible(e.target.checked);
     });
 
     // Flights
@@ -250,18 +246,19 @@ const NexusControls = (() => {
       if (el) el.value = saved;
     }
 
-    // Fullscreen
-    document.getElementById('btn-fullscreen')?.addEventListener('click', () => {
-      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
-      else document.exitFullscreen();
-    });
-
     // Space weather
     document.getElementById('btn-load-weather')?.addEventListener('click', loadSpaceWeather);
 
-    // Refresh all layers button
+    // Refresh all layers button — also resets camera and stops all tracking
     document.getElementById('btn-refresh-all')?.addEventListener('click', async () => {
       NexusToast.show('Refreshing all data layers...', 'info', 2000);
+
+      // Stop all tracking and reset camera to default globe view
+      SatelliteLayer.stopTracking();
+      SpaceLayer.stopTracking();
+      NexusPanels.hideEntityPanel();
+      NexusGlobe.resetCamera();
+
       const group = document.getElementById('sat-group')?.value || 'active';
       const mag = parseFloat(document.getElementById('seismic-mag')?.value || '2.5');
       const period = document.getElementById('seismic-period')?.value || 'day';
@@ -278,6 +275,50 @@ const NexusControls = (() => {
   function _setupDeselect() {
     document.getElementById('btn-deselect')?.addEventListener('click', () => {
       NexusPanels.hideEntityPanel();
+    });
+  }
+
+  // ── Immersive Mode — hide all panels for full-globe experience ──────────
+  function _setupImmersiveMode() {
+    let immersive = false;
+
+    function _setImmersiveMode(on) {
+      immersive = on;
+      ['topbar', 'sidebar-left', 'sidebar-right', 'statusbar'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.toggle('panel-collapsed', on);
+      });
+      const main = document.getElementById('main-layout');
+      if (main) main.classList.toggle('immersive', on);
+
+      const btn = document.getElementById('btn-immersive');
+      if (btn) {
+        btn.textContent = on ? '◧' : '◨';
+        btn.classList.toggle('active', on);
+      }
+    }
+
+    // Immersive mode button
+    document.getElementById('btn-immersive')?.addEventListener('click', () => {
+      _setImmersiveMode(!immersive);
+    });
+
+    // Fullscreen button — also enters immersive mode
+    document.getElementById('btn-fullscreen')?.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+        _setImmersiveMode(true);
+      } else {
+        document.exitFullscreen();
+        _setImmersiveMode(false);
+      }
+    });
+
+    // ESC exits fullscreen → also exit immersive
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement && immersive) {
+        _setImmersiveMode(false);
+      }
     });
   }
 

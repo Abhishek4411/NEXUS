@@ -5,7 +5,7 @@
  */
 
 (async () => {
-  console.log('%cNEXUS — Global Intelligence Platform v1.2', 'color:#00f0ff;font-size:16px;font-weight:bold');
+  console.log('%cNEXUS — Global Intelligence Platform v1.6.2', 'color:#00f0ff;font-size:16px;font-weight:bold');
   console.log('%cInitializing systems...', 'color:#c0deff');
 
   // ── 1. Fetch config (Cesium Ion token from server .env) ───────────────
@@ -27,7 +27,6 @@
   FlightLayer.init(cesiumViewer);
   SeismicLayer.init(cesiumViewer);
   LaunchLayer.init(cesiumViewer);
-  ISSLayer.init(cesiumViewer);
   NeoLayer.init(cesiumViewer);
   SpaceLayer.init(cesiumViewer);
 
@@ -43,7 +42,6 @@
 
   // Connect real-time WebSocket feeds
   FlightLayer.connect();
-  ISSLayer.connect();
 
   // REST data
   await Promise.all([
@@ -51,7 +49,6 @@
     LaunchLayer.load(),
   ]);
 
-  await ISSLayer.loadCrew();
   await loadSpaceWeather();
 
   console.log('✅ NEXUS fully operational');

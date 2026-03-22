@@ -3,11 +3,11 @@
  *
  * Features:
  *   - Real-time Sun & Moon positions (astronomical algorithms, updates every 60s)
- *   - 7 planets at correct RA/Dec with realistic relative sizes
+ *   - 3D ellipsoid planets with realistic textures (fallback to colored spheres)
  *   - Black holes: Gaia BH1, Gaia BH2, Sagittarius A*, M87*
  *   - Andromeda Galaxy (M31), Milky Way Core
- *   - Asteroid belt ring (between Mars and Jupiter)
- *   - Track any object — camera follows in real time
+ *   - Asteroid belt ring (300 points between Mars and Jupiter)
+ *   - Continuous camera tracking via viewer.trackedEntity
  *   - Orbit paths: Moon (29.5d), Sun ecliptic (1yr), planets
  *   - Searchable by name from the search bar
  */
@@ -16,10 +16,10 @@ const SpaceLayer = (() => {
   let viewer = null;
   let entities = [];
   let orbitEntities = [];
+  let beltEntities = [];
   let visible = false;
   let _updateInterval = null;
   let _trackedId = null;
-  let _trackInterval = null;
 
   // ── Astronomical algorithms ───────────────────────────────────────────────
 
@@ -68,15 +68,47 @@ const SpaceLayer = (() => {
     return Cesium.Cartesian3.fromDegrees(lon, lat, altM);
   }
 
-  // ── Icon generators ───────────────────────────────────────────────────────
-  function _circleIcon(fill, stroke, size = 24, glowOpacity = 0.3) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-      <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 1}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" opacity="0.9"/>
-      <circle cx="${size/2}" cy="${size/2}" r="${size/2 - 3}" fill="${fill}" opacity="${glowOpacity}"/>
-    </svg>`;
-    return `data:image/svg+xml;base64,${btoa(svg)}`;
-  }
+  // ── Planet textures (Solar System Scope — CC BY 4.0) ──────────────────────
+  // Fallback to solid colors if CORS blocks cross-origin textures
+  const TEXTURES = {
+    sun:     'https://www.solarsystemscope.com/textures/download/2k_sun.jpg',
+    moon:    'https://www.solarsystemscope.com/textures/download/2k_moon.jpg',
+    mercury: 'https://www.solarsystemscope.com/textures/download/2k_mercury.jpg',
+    venus:   'https://www.solarsystemscope.com/textures/download/2k_venus_atmosphere.jpg',
+    mars:    'https://www.solarsystemscope.com/textures/download/2k_mars.jpg',
+    jupiter: 'https://www.solarsystemscope.com/textures/download/2k_jupiter.jpg',
+    saturn:  'https://www.solarsystemscope.com/textures/download/2k_saturn.jpg',
+    uranus:  'https://www.solarsystemscope.com/textures/download/2k_uranus.jpg',
+    neptune: 'https://www.solarsystemscope.com/textures/download/2k_neptune.jpg',
+  };
 
+  // Fallback colors if textures fail to load
+  const COLORS = {
+    sun:     '#ffffa0',
+    moon:    '#c8c8c8',
+    mercury: '#b5b5b5',
+    venus:   '#f5deb3',
+    mars:    '#cd5c5c',
+    jupiter: '#d2a679',
+    saturn:  '#e4d191',
+    uranus:  '#7de8e8',
+    neptune: '#3f54ba',
+  };
+
+  // ── Planet config: scene distances + radii (scaled for navigability) ──────
+  const PLANET_CFG = {
+    sun:     { sceneAlt: 3e11,   sceneRadius: 2e9 },
+    moon:    { sceneAlt: 3.84e8, sceneRadius: 5e6 },
+    mercury: { sceneAlt: 2e10,   sceneRadius: 1e8 },
+    venus:   { sceneAlt: 3.6e10, sceneRadius: 2e8 },
+    mars:    { sceneAlt: 7.6e10, sceneRadius: 1.5e8 },
+    jupiter: { sceneAlt: 2.6e11, sceneRadius: 5e8 },
+    saturn:  { sceneAlt: 4.77e11, sceneRadius: 4e8 },
+    uranus:  { sceneAlt: 9.6e11, sceneRadius: 3e8 },
+    neptune: { sceneAlt: 1.5e12, sceneRadius: 2.8e8 },
+  };
+
+  // ── Icon generators (for non-planet objects) ──────────────────────────────
   function _galaxyIcon(fill, size = 28) {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
       <ellipse cx="${size/2}" cy="${size/2}" rx="${size/2 - 2}" ry="${size/4}" fill="${fill}" opacity="0.7" stroke="${fill}" stroke-width="1"/>
@@ -96,18 +128,14 @@ const SpaceLayer = (() => {
   }
 
   // ── Object catalog ────────────────────────────────────────────────────────
-  // ra/dec null = computed dynamically each update
+  // Objects with a PLANET_CFG entry render as 3D ellipsoids.
+  // Others render as billboards (black holes, galaxies).
   const OBJECTS = [
     {
       id: 'sun', name: 'Sun', type: 'star',
-      ra: null, dec: null, altM: 3e11,
-      icon: _circleIcon('#ffffa0', '#ffdd00', 36, 0.7),
-      size: 36,
-      dynamic: true,
-      getRaDec: _sunRaDec,
-      orbitPeriodDays: 365.25,
-      orbitAltM: 3e11,
-      orbitColor: '#ffdd00',
+      ra: null, dec: null,
+      dynamic: true, getRaDec: _sunRaDec,
+      orbitPeriodDays: 365.25, orbitColor: '#ffdd00',
       data: {
         type: 'Star (G-type main sequence)', distance: '149.6 million km (1 AU)',
         diameter: '1,392,700 km (109× Earth)', mass: '1.989 × 10³⁰ kg',
@@ -117,60 +145,56 @@ const SpaceLayer = (() => {
     },
     {
       id: 'moon', name: 'Moon', type: 'natural_satellite',
-      ra: null, dec: null, altM: 3.84e8,
-      icon: _circleIcon('#c8c8c8', '#999999', 26, 0.3),
-      size: 26,
-      dynamic: true,
-      getRaDec: _moonRaDec,
-      orbitPeriodDays: 29.5,
-      orbitAltM: 3.84e8,
-      orbitColor: '#aaaaaa',
+      ra: null, dec: null,
+      dynamic: true, getRaDec: _moonRaDec,
+      orbitPeriodDays: 29.5, orbitColor: '#aaaaaa',
       data: {
         type: 'Natural Satellite', distance: '384,400 km (avg)',
         diameter: '3,474 km (0.27× Earth)', orbital_period: '27.3 days',
         description: "Earth's only natural satellite. Stabilizes Earth's axial tilt.",
       }
     },
-    { id: 'mercury', name: 'Mercury', type: 'planet', ra: 30, dec: 5, altM: 1.5e12,
-      icon: _circleIcon('#b5b5b5', '#999', 14), size: 14,
+    { id: 'mercury', name: 'Mercury', type: 'planet', ra: 30, dec: 5,
+      orbitPeriodDays: 87.97, orbitColor: '#b5b5b5',
       data: { type: 'Terrestrial Planet', distance: '77 million km (avg)', diameter: '4,879 km',
         orbital_period: '88 Earth days', description: 'Closest planet to the Sun. Extreme temperature swings.' }
     },
-    { id: 'venus', name: 'Venus', type: 'planet', ra: 60, dec: 10, altM: 1.5e12,
-      icon: _circleIcon('#f5deb3', '#e8c070', 18), size: 18,
+    { id: 'venus', name: 'Venus', type: 'planet', ra: 60, dec: 10,
+      orbitPeriodDays: 224.7, orbitColor: '#f5deb3',
       data: { type: 'Terrestrial Planet', distance: '38 million km (closest)', diameter: '12,104 km',
         orbital_period: '225 Earth days', surface_temp: '465°C', description: 'Hottest planet. Dense CO₂ atmosphere.' }
     },
-    { id: 'mars', name: 'Mars', type: 'planet', ra: 120, dec: 15, altM: 1.5e12,
-      icon: _circleIcon('#cd5c5c', '#aa3333', 17), size: 17,
+    { id: 'mars', name: 'Mars', type: 'planet', ra: 120, dec: 15,
+      orbitPeriodDays: 687, orbitColor: '#cd5c5c',
       data: { type: 'Terrestrial Planet', distance: '56–225 million km', diameter: '6,779 km',
         orbital_period: '687 Earth days', moons: 'Phobos, Deimos',
         description: 'The Red Planet. Has Olympus Mons, largest volcano in solar system.' }
     },
-    { id: 'jupiter', name: 'Jupiter', type: 'planet', ra: 180, dec: 5, altM: 1.5e12,
-      icon: _circleIcon('#d2a679', '#c08040', 30), size: 30,
+    { id: 'jupiter', name: 'Jupiter', type: 'planet', ra: 180, dec: 5,
+      orbitPeriodDays: 4333, orbitColor: '#d2a679',
       data: { type: 'Gas Giant', distance: '588–968 million km', diameter: '139,820 km (largest)',
         orbital_period: '11.9 Earth years', moons: '95 known (Io, Europa, Ganymede, Callisto)',
         great_red_spot: 'Storm 340+ years old', description: 'Largest planet. Protects inner solar system.' }
     },
-    { id: 'saturn', name: 'Saturn', type: 'planet', ra: 210, dec: -5, altM: 1.5e12,
-      icon: _circleIcon('#e4d191', '#c8b060', 27), size: 27,
+    { id: 'saturn', name: 'Saturn', type: 'planet', ra: 210, dec: -5,
+      orbitPeriodDays: 10759, orbitColor: '#e4d191',
       data: { type: 'Gas Giant (Ringed)', distance: '1.2–1.67 billion km', diameter: '116,460 km',
         orbital_period: '29.5 Earth years', rings: 'Seven ring groups, 282,000 km wide', moons: '146 known',
         description: 'Famous for its spectacular ring system made of ice and rock.' }
     },
-    { id: 'uranus', name: 'Uranus', type: 'planet', ra: 240, dec: -10, altM: 1.5e12,
-      icon: _circleIcon('#7de8e8', '#50c8c8', 22), size: 22,
+    { id: 'uranus', name: 'Uranus', type: 'planet', ra: 240, dec: -10,
+      orbitPeriodDays: 30687, orbitColor: '#7de8e8',
       data: { type: 'Ice Giant', distance: '2.58–3.15 billion km', diameter: '50,724 km',
         orbital_period: '84 Earth years', axial_tilt: '97.77° (rotates on its side)',
         description: 'Rotates on its side. Coldest planetary atmosphere.' }
     },
-    { id: 'neptune', name: 'Neptune', type: 'planet', ra: 270, dec: -15, altM: 1.5e12,
-      icon: _circleIcon('#3f54ba', '#2244aa', 22), size: 22,
+    { id: 'neptune', name: 'Neptune', type: 'planet', ra: 270, dec: -15,
+      orbitPeriodDays: 60190, orbitColor: '#3f54ba',
       data: { type: 'Ice Giant', distance: '4.3–4.7 billion km', diameter: '49,528 km',
         orbital_period: '165 Earth years', wind_speed: '2,100 km/h (fastest in solar system)',
         description: 'Windiest planet. Has Great Dark Spot similar to Jupiter\'s Great Red Spot.' }
     },
+    // ── Deep space objects (billboard rendering) ──
     { id: 'gaia_bh1', name: 'Gaia BH1', type: 'stellar_black_hole', ra: 262.175, dec: -0.808, altM: 8e13,
       icon: _bhIcon(22), size: 22,
       data: { type: 'Stellar Black Hole', distance: '1,560 light-years', mass: '9.6 solar masses',
@@ -223,59 +247,178 @@ const SpaceLayer = (() => {
     return { ra: obj.ra ?? 0, dec: obj.dec ?? 0 };
   }
 
+  /** Get the scene altitude for an object (from PLANET_CFG or obj.altM) */
+  function _getAltM(obj) {
+    const cfg = PLANET_CFG[obj.id];
+    return cfg ? cfg.sceneAlt : (obj.altM || 1e12);
+  }
+
+  // ── Load all objects ──────────────────────────────────────────────────────
   function load() {
     _clear();
     const now = Date.now();
 
+    // Disable built-in CesiumJS moon to avoid duplicate
+    NexusGlobe.setBuiltinMoon(false);
+
     for (const obj of OBJECTS) {
       const { ra, dec } = _getCurrentRaDec(obj, now);
-      const pos = _radecToCartesian(ra, dec, obj.altM, now);
+      const altM = _getAltM(obj);
+      const pos = _radecToCartesian(ra, dec, altM, now);
 
-      const typeLabel = {
-        star: '⭐', planet: '🪐', natural_satellite: '🌕',
-        stellar_black_hole: '⬛ BH', supermassive_black_hole: '⬛ SMBH',
-        galaxy: '🌌', galaxy_core: '🌌',
-      }[obj.type] || '•';
+      const cfg = PLANET_CFG[obj.id];
 
-      const ent = viewer.entities.add({
-        id: `space-${obj.id}`,
-        position: pos,
-        billboard: {
-          image: obj.icon,
-          width: obj.size,
-          height: obj.size,
-          verticalOrigin: Cesium.VerticalOrigin.CENTER,
-          scaleByDistance: new Cesium.NearFarScalar(1e7, 3.0, 1e13, 0.3),
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 5e13),
-        },
-        label: {
-          text: `${typeLabel} ${obj.name}`,
-          font: 'bold 10px Courier New',
-          fillColor: obj.type.includes('black_hole') ? Cesium.Color.fromCssColorString('#cc88ff')
-            : obj.type === 'star' ? Cesium.Color.fromCssColorString('#ffff88')
-            : obj.type === 'galaxy' || obj.type === 'galaxy_core' ? Cesium.Color.fromCssColorString('#aaaaff')
-            : Cesium.Color.fromCssColorString('#c0deff'),
-          outlineColor: Cesium.Color.BLACK,
-          outlineWidth: 2,
-          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          pixelOffset: new Cesium.Cartesian2(0, -obj.size / 2 - 4),
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2e13),
-          show: true,
-        },
-        properties: {
-          type: 'space_object',
-          subtype: obj.type,
-          data: { ...obj.data, name: obj.name, id: obj.id },
-        },
-      });
-      entities.push(ent);
+      if (cfg) {
+        // ── 3D Ellipsoid planet/star/moon ──
+        _createEllipsoidEntity(obj, pos, cfg);
+      } else {
+        // ── Billboard (black holes, galaxies) ──
+        _createBillboardEntity(obj, pos);
+      }
     }
+
+    // Asteroid belt
+    _createAsteroidBelt();
 
     // Start dynamic position updates for Sun + Moon
     _startDynamicUpdates();
 
     visible = true;
-    NexusToast.show(`${OBJECTS.length} space objects — click any to explore`, 'info', 4000);
+    NexusToast.show(`Solar System loaded — ${OBJECTS.length} objects + asteroid belt`, 'info', 4000);
+  }
+
+  /** Create a 3D ellipsoid entity for a planet/star/moon */
+  function _createEllipsoidEntity(obj, pos, cfg) {
+    const r = cfg.sceneRadius;
+    const colorStr = COLORS[obj.id] || '#888888';
+    const textureUrl = TEXTURES[obj.id];
+
+    // Try texture first, fall back to solid color
+    let material;
+    if (textureUrl) {
+      material = new Cesium.ImageMaterialProperty({
+        image: textureUrl,
+        repeat: new Cesium.Cartesian2(1, 1),
+      });
+    } else {
+      material = Cesium.Color.fromCssColorString(colorStr);
+    }
+
+    const typeLabel = {
+      star: '⭐', planet: '🪐', natural_satellite: '🌕',
+    }[obj.type] || '•';
+
+    // Use CallbackProperty + posRef so viewer.trackedEntity can continuously follow
+    const posRef = { value: pos };
+
+    const ent = viewer.entities.add({
+      id: `space-${obj.id}`,
+      position: new Cesium.CallbackProperty(() => posRef.value, false),
+      ellipsoid: {
+        radii: new Cesium.Cartesian3(r, r, r),
+        material: material,
+        slicePartitions: 36,
+        stackPartitions: 18,
+      },
+      label: {
+        text: `${typeLabel} ${obj.name}`,
+        font: 'bold 11px Courier New',
+        fillColor: obj.type === 'star' ? Cesium.Color.fromCssColorString('#ffff88')
+          : Cesium.Color.fromCssColorString('#c0deff'),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -24),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, cfg.sceneAlt * 5),
+        scaleByDistance: new Cesium.NearFarScalar(cfg.sceneRadius * 2, 1.0, cfg.sceneAlt * 3, 0.4),
+        show: true,
+      },
+      properties: {
+        type: 'space_object',
+        subtype: obj.type,
+        data: { ...obj.data, name: obj.name, id: obj.id },
+      },
+    });
+    ent._posRef = posRef;  // store ref for dynamic position updates
+    entities.push(ent);
+  }
+
+  /** Create a billboard entity for deep-space objects */
+  function _createBillboardEntity(obj, pos) {
+    const typeLabel = {
+      stellar_black_hole: '⬛ BH', supermassive_black_hole: '⬛ SMBH',
+      galaxy: '🌌', galaxy_core: '🌌',
+    }[obj.type] || '•';
+
+    // Per-type scaling instead of one-size-fits-all
+    const scaleMap = {
+      stellar_black_hole:      new Cesium.NearFarScalar(1e10, 2.0, 5e13, 0.5),
+      supermassive_black_hole: new Cesium.NearFarScalar(1e11, 3.0, 8e13, 0.5),
+      galaxy:                  new Cesium.NearFarScalar(1e11, 3.0, 8e13, 0.5),
+      galaxy_core:             new Cesium.NearFarScalar(1e11, 2.5, 8e13, 0.5),
+    };
+
+    // Use CallbackProperty + posRef so viewer.trackedEntity can continuously follow
+    const posRef = { value: pos };
+
+    const ent = viewer.entities.add({
+      id: `space-${obj.id}`,
+      position: new Cesium.CallbackProperty(() => posRef.value, false),
+      billboard: {
+        image: obj.icon,
+        width: obj.size,
+        height: obj.size,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        scaleByDistance: scaleMap[obj.type] || new Cesium.NearFarScalar(1e7, 3.0, 1e13, 0.3),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 5e14),
+      },
+      label: {
+        text: `${typeLabel} ${obj.name}`,
+        font: 'bold 10px Courier New',
+        fillColor: obj.type.includes('black_hole') ? Cesium.Color.fromCssColorString('#cc88ff')
+          : Cesium.Color.fromCssColorString('#aaaaff'),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -obj.size / 2 - 4),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2e14),
+        show: true,
+      },
+      properties: {
+        type: 'space_object',
+        subtype: obj.type,
+        data: { ...obj.data, name: obj.name, id: obj.id },
+      },
+    });
+    ent._posRef = posRef;  // store ref for dynamic position updates
+    entities.push(ent);
+  }
+
+  // ── Asteroid belt (300 points between Mars and Jupiter) ───────────────────
+  function _createAsteroidBelt() {
+    const BELT_COUNT = 300;
+    const MIN_ALT = 1e11;    // ~1.3 AU scaled (just beyond Mars at 7.6e10)
+    const MAX_ALT = 2.3e11;  // ~3 AU scaled (just before Jupiter at 2.6e11)
+
+    for (let i = 0; i < BELT_COUNT; i++) {
+      const alt = MIN_ALT + Math.random() * (MAX_ALT - MIN_ALT);
+      const ra = Math.random() * 360;
+      const dec = (Math.random() - 0.5) * 8; // small scatter around ecliptic
+      const pos = _radecToCartesian(ra, dec, alt);
+      const size = 3 + Math.random() * 5;
+
+      const ent = viewer.entities.add({
+        id: `asteroid-belt-${i}`,
+        position: pos,
+        point: {
+          pixelSize: size,
+          color: Cesium.Color.fromCssColorString('#8b7355').withAlpha(0.5 + Math.random() * 0.5),
+          scaleByDistance: new Cesium.NearFarScalar(1e9, 1.5, 5e11, 0.3),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2e12),
+        },
+      });
+      beltEntities.push(ent);
+    }
   }
 
   // ── Dynamic position updates (Sun + Moon move) ────────────────────────────
@@ -292,7 +435,11 @@ const SpaceLayer = (() => {
       const ent = viewer.entities.getById(`space-${obj.id}`);
       if (!ent) continue;
       const { ra, dec } = _getCurrentRaDec(obj, now);
-      ent.position = _radecToCartesian(ra, dec, obj.altM, now);
+      const newPos = _radecToCartesian(ra, dec, _getAltM(obj), now);
+      // Update via posRef so CallbackProperty returns new position
+      if (ent._posRef) {
+        ent._posRef.value = newPos;
+      }
     }
   }
 
@@ -301,13 +448,14 @@ const SpaceLayer = (() => {
     if (!obj.orbitPeriodDays) return null;
     const now = Date.now();
     const periodMs = obj.orbitPeriodDays * 86400000;
+    const altM = _getAltM(obj);
     const steps = 120;
     const points = [];
 
     for (let i = 0; i <= steps; i++) {
       const t = now - periodMs / 2 + (i / steps) * periodMs;
       const { ra, dec } = _getCurrentRaDec(obj, t);
-      points.push(_radecToCartesian(ra, dec, obj.orbitAltM || obj.altM, t));
+      points.push(_radecToCartesian(ra, dec, altM, t));
     }
     return points;
   }
@@ -338,7 +486,7 @@ const SpaceLayer = (() => {
     orbitEntities = [];
   }
 
-  // ── Tracking ──────────────────────────────────────────────────────────────
+  // ── Tracking (continuous via viewer.trackedEntity) ────────────────────────
   function trackObject(objId) {
     stopTracking();
     _trackedId = objId;
@@ -349,39 +497,36 @@ const SpaceLayer = (() => {
     // Show orbit if available
     showOrbitForObject(objId);
 
-    // Fly to object
-    _flyToObject(obj);
+    // Use Cesium's built-in tracked entity for continuous camera follow
+    const entity = viewer.entities.getById(`space-${objId}`);
+    if (entity) {
+      // First fly to the object, then lock tracking
+      const altM = _getAltM(obj);
+      const viewDist = altM * (obj.type === 'star' ? 0.3 : 1.5);
 
-    // For dynamic objects (Sun/Moon), keep camera following
-    if (obj.dynamic) {
-      _trackInterval = setInterval(() => {
-        if (_trackedId !== objId) return;
-        _flyToObject(obj, 1.5);  // smooth re-center
-      }, 30000);  // re-center every 30s (Sun/Moon move slowly)
+      // Set as tracked entity — camera continuously follows
+      viewer.trackedEntity = entity;
+
+      // Adjust zoom distance after tracking locks
+      setTimeout(() => {
+        if (_trackedId === objId) {
+          const cfg = PLANET_CFG[obj.id];
+          const zoomDist = cfg ? cfg.sceneRadius * 5 : viewDist;
+          viewer.camera.zoomOut(zoomDist);
+        }
+      }, 500);
     }
 
-    NexusToast.show(`Tracking ${obj.name} — zoom/pan freely`, 'info', 3000);
-  }
-
-  function _flyToObject(obj, duration = 2) {
-    const now = Date.now();
-    const { ra, dec } = _getCurrentRaDec(obj, now);
-    const center = _radecToCartesian(ra, dec, obj.altM, now);
-    const viewDist = obj.altM * (obj.type === 'star' ? 0.5 : obj.type.includes('black_hole') ? 1.5 : 2.0);
-
-    viewer.camera.flyToBoundingSphere(
-      new Cesium.BoundingSphere(center, obj.altM * 0.1),
-      {
-        duration,
-        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-20), viewDist),
-      }
-    );
+    NexusToast.show(`Tracking ${obj.name} — zoom/orbit freely, click Refresh to stop`, 'info', 3000);
   }
 
   function stopTracking() {
     _trackedId = null;
-    if (_trackInterval) { clearInterval(_trackInterval); _trackInterval = null; }
     _clearOrbits();
+    if (viewer) {
+      viewer.trackedEntity = undefined;
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    }
   }
 
   // ── Search integration ────────────────────────────────────────────────────
@@ -397,14 +542,26 @@ const SpaceLayer = (() => {
     if (_updateInterval) { clearInterval(_updateInterval); _updateInterval = null; }
     entities.forEach(e => viewer.entities.remove(e));
     entities = [];
+    beltEntities.forEach(e => viewer.entities.remove(e));
+    beltEntities = [];
     _clearOrbits();
+    // Re-enable built-in moon
+    NexusGlobe.setBuiltinMoon(true);
   }
 
   function setVisible(v) {
     visible = v;
     entities.forEach(e => { e.show = v; });
-    if (v && entities.length === 0) load();
-    if (!v) { stopTracking(); if (_updateInterval) { clearInterval(_updateInterval); _updateInterval = null; } }
+    beltEntities.forEach(e => { e.show = v; });
+    if (v && entities.length === 0) {
+      load();
+    } else if (!v) {
+      stopTracking();
+      if (_updateInterval) { clearInterval(_updateInterval); _updateInterval = null; }
+      NexusGlobe.setBuiltinMoon(true);
+    } else {
+      NexusGlobe.setBuiltinMoon(false);
+    }
   }
 
   return { init, load, setVisible, trackObject, stopTracking, showOrbitForObject, search };

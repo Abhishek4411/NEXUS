@@ -413,6 +413,63 @@ html, body {
 .mono { font-family: var(--font-mono); }
 
 /* ══════════════════════════════════════════════════════
+   IMMERSIVE MODE — collapsible panels
+══════════════════════════════════════════════════════ */
+#topbar, #sidebar-left, #sidebar-right, #statusbar {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s ease,
+              width 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+              padding 0.3s ease;
+}
+
+#topbar.panel-collapsed {
+  transform: translateY(-100%) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+#sidebar-left.panel-collapsed {
+  transform: translateX(-100%) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  border: none !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+#sidebar-right.panel-collapsed {
+  transform: translateX(100%) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  border: none !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+#statusbar.panel-collapsed {
+  transform: translateY(100%) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+#main-layout.immersive {
+  top: 0 !important;
+  bottom: 0 !important;
+}
+
+/* Immersive mode toggle button active state */
+#btn-immersive.active {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  box-shadow: var(--glow-cyan);
+}
+
+/* ══════════════════════════════════════════════════════
    RESPONSIVE — collapse sidebars on small screens
 ══════════════════════════════════════════════════════ */
 @media (max-width: 900px) {

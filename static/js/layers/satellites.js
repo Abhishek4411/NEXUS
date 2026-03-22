@@ -162,9 +162,9 @@ const SatelliteLayer = (() => {
   // Propagate SGP4 every 1 second; interpolate entity positions every frame.
   let _prevPositions = new Map();   // noradId -> Cartesian3 (position at last update)
   let _currPositions = new Map();   // noradId -> Cartesian3 (position at current update)
+  let _interpPositions = new Map(); // noradId -> Cartesian3 (interpolated position for current frame)
   let _lastUpdateMs = 0;
   const UPDATE_MS = 1000;           // SGP4 re-propagation interval (1s)
-  const _scratch = new Cesium.Cartesian3();
 
   function _startUpdateLoop() {
     if (updateTimer) {
@@ -189,19 +189,12 @@ const SatelliteLayer = (() => {
         }
       }
 
-      // Tracking: on first lock, fly to satellite centered on screen — then release camera
+      // Tracking: on first lock, set viewer.trackedEntity for continuous camera follow
       if (trackedId !== null && _trackJustStarted) {
         _trackJustStarted = false;
-        const pos = positions.find(p => p.noradId === trackedId);
-        if (pos) {
-          const center = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.altM);
-          viewer.camera.flyToBoundingSphere(
-            new Cesium.BoundingSphere(center, pos.altM * 0.3),
-            {
-              duration: 2,
-              offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), pos.altM * 2.5),
-            }
-          );
+        const entity = entities.get(trackedId);
+        if (entity) {
+          viewer.trackedEntity = entity;
         }
       }
     }, UPDATE_MS);
@@ -222,7 +215,9 @@ const SatelliteLayer = (() => {
 
   function _smoothTick() {
     if (!visible) return;
-    const t = Math.min((Date.now() - _lastUpdateMs) / UPDATE_MS, 1.0);
+    // Allow t > 1.0 for extrapolation — prevents "pause" between SGP4 updates
+    // Satellites keep moving in the same direction until next propagation corrects drift
+    const t = Math.min((Date.now() - _lastUpdateMs) / UPDATE_MS, 1.5);
     const altKm = NexusGlobe.getCameraAltKm();
     const showLabels = altKm < 5000;
 
@@ -230,8 +225,10 @@ const SatelliteLayer = (() => {
       const prev = _prevPositions.get(noradId);
       const curr = _currPositions.get(noradId);
       if (!prev || !curr) return;
-      Cesium.Cartesian3.lerp(prev, curr, t, _scratch);
-      ent.position = _scratch.clone();  // clone to avoid shared mutation
+      // Store interpolated/extrapolated position — CallbackProperty reads from this map
+      const interp = new Cesium.Cartesian3();
+      Cesium.Cartesian3.lerp(prev, curr, t, interp);
+      _interpPositions.set(noradId, interp);
       if (ent.label) ent.label.show = showLabels;
     });
   }
@@ -239,9 +236,13 @@ const SatelliteLayer = (() => {
   function _createEntity(noradId, position, meta) {
     const icon = _iconFor(meta, currentGroup);
     const size = _sizeFor(meta, currentGroup);
+    // Use CallbackProperty so viewer.trackedEntity can continuously follow
+    const positionProperty = new Cesium.CallbackProperty(() => {
+      return _interpPositions.get(noradId) || _currPositions.get(noradId) || position;
+    }, false);
     const ent = viewer.entities.add({
       id: `sat-${noradId}`,
-      position,
+      position: positionProperty,
       billboard: {
         image: icon,
         width: size,
@@ -319,11 +320,14 @@ const SatelliteLayer = (() => {
   function trackSatellite(noradId) {
     trackedId = noradId;
     _trackJustStarted = true;
-    // Release any existing camera lock so user can navigate freely
-    viewer.trackedEntity = undefined;
-    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
     showOrbit(noradId);
-    NexusToast.show('Tracking — zoom/pan freely, orbit path shown', 'info', 3000);
+
+    // Use Cesium's built-in trackedEntity for continuous camera follow
+    const entity = entities.get(noradId);
+    if (entity) {
+      viewer.trackedEntity = entity;
+    }
+    NexusToast.show('Tracking satellite — zoom/orbit freely, click Refresh to stop', 'info', 3000);
   }
 
   function stopTracking() {
@@ -345,6 +349,7 @@ const SatelliteLayer = (() => {
     entities.clear();
     _prevPositions.clear();
     _currPositions.clear();
+    _interpPositions.clear();
     _clearOrbit();
     if (viewer) viewer.scene.preRender.removeEventListener(_smoothTick);
   }

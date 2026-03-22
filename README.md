@@ -20,14 +20,19 @@
 
 ### Key Capabilities
 
+- **GPU Accelerated** — Forces discrete NVIDIA GPU via WebGL `powerPreference: "high-performance"` + auto-detects active GPU renderer at startup
+- **3D Planet Rendering** — Sun, Moon, and all 8 planets rendered as textured 3D ellipsoids (Solar System Scope 2K textures)
+- **Asteroid Belt** — 300-point particle ring between Mars and Jupiter orbits
+- **Continuous Camera Tracking** — Click TRACK on any object; camera continuously follows via `CallbackProperty` with 60fps interpolated positions and extrapolation for ultra-smooth motion
+- **Immersive Mode** — Hide all panels for full-globe experience; fullscreen auto-enters immersive mode
 - **7 Imagery Modes** — ESRI Satellite, Hybrid (satellite + labels), OSM Streets, Stadia Terrain, Carto Light, Carto Dark, Google Satellite (Cesium Ion token required)
-- **Clickable & Trackable** — Click any entity (satellite, flight, earthquake, space object) to open its detail panel; click TRACK to follow it with smooth camera
-- **Planetary Tracking** — Search or click any planet/Moon/Sun to fly to it and optionally show its orbit path
 - **Orbit Path Visualization** — 120-point computed orbit overlays for planets, the ISS, and asteroids
 - **Real Astronomical Positions** — Sun and Moon positions computed via J2000.0 algorithms, updated every 60s
 - **Smart Search** — Searches satellites (NORAD/name), cities/countries/airports (Nominatim geocoding), and solar system objects simultaneously
 - **Stale-cache Resilience** — Always shows last-known-good data for flights/launches even when upstream APIs are rate-limited; source tag shown in status bar (`[OPENSKY]` / `[ADSB.FI]` / `[CACHED]`)
-- **↺ Refresh All** — One-click refresh of all active data layers without a browser reload
+- **↺ Refresh All** — Resets camera, stops tracking, and refreshes all data layers without browser reload
+- **Living Globe Auto-Rotation** — Earth slowly spins west-to-east (~6 min/revolution); pauses on interaction, resumes after 3s of inactivity
+- **Smooth Zoom** — Reduced scroll sensitivity for precise zoom control
 - **IST Timezone** — All timestamps displayed in Indian Standard Time (UTC+5:30), including server logs
 - **Visual Effects** — NVG (night vision green), Thermal, CRT scanlines, Bloom glow
 
